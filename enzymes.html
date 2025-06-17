@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Enzymes and Substrates Simulation</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #222;
+      color: #eee;
+      font-family: sans-serif;
+    }
+    #controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 10px;
+      border-radius: 5px;
+      text-align: center;
+    }
+    #title {
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+    #counter {
+      margin-bottom: 10px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 14px;
+    }
+    button {
+      margin-top: 10px;
+      padding: 5px 10px;
+      font-size: 14px;
+      cursor: pointer;
+      border: none;
+      background: #444;
+      color: #eee;
+      border-radius: 3px;
+    }
+    button:hover {
+      background: #555;
+    }
+    /* Style for the range sliders */
+    input[type="range"] {
+      width: 200px;
+      -webkit-appearance: none;
+      background: #444; /* dark gray track */
+      margin: 10px 0;
+    }
+    /* WebKit slider thumb */
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      background: #888;
+      border: 1px solid #666;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    /* WebKit slider track */
+    input[type="range"]::-webkit-slider-runnable-track {
+      height: 6px;
+      background: #555;
+      border-radius: 3px;
+    }
+    /* Mozilla slider thumb */
+    input[type="range"]::-moz-range-thumb {
+      background: #888;
+      border: 1px solid #666;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    input[type="range"]::-moz-range-track {
+      height: 6px;
+      background: #555;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <div id="title">Amylase digesting Starch</div>
+    <div id="counter">% of starch digested: 0%</div>
+    <label>
+      Enzymes:
+      <input type="range" id="enzymeSlider" min="0" max="50" value="10">
+    </label>
+    <label>
+      Substrates:
+      <input type="range" id="substrateSlider" min="0" max="20" value="5">
+    </label>
+    <button id="resetButton">Reset</button>
+  </div>
+  <canvas id="simulationCanvas"></canvas>
+
+  <script>
+    // Get canvas and context
+    const canvas = document.getElementById("simulationCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // Resize the canvas to fill the window
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+
+    // Global arrays for enzymes and substrate chains
+    let enzymes = [];
+    let substrates = [];
+
+    // Grab the slider elements and set target counts
+    const enzymeSlider = document.getElementById("enzymeSlider");
+    const substrateSlider = document.getElementById("substrateSlider");
+    let targetEnzymeCount = parseInt(enzymeSlider.value);
+    let targetSubstrateCount = parseInt(substrateSlider.value);
+
+    // When sliders change, adjust the current arrays
+    enzymeSlider.addEventListener("input", function() {
+      targetEnzymeCount = parseInt(this.value);
+      adjustEnzymes();
+    });
+    substrateSlider.addEventListener("input", function() {
+      targetSubstrateCount = parseInt(this.value);
+      adjustSubstrates();
+    });
+
+    // Reset button event listener to reassemble substrate chains.
+    document.getElementById("resetButton").addEventListener("click", function() {
+      resetSubstrates();
+    });
+
+    // --- Object Creation Functions ---
+
+    // Create a new enzyme with random position and small random velocity.
+    // Enzymes are now 4 times larger (radius is 32 instead of 8).
+    function createEnzyme() {
+      return {
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        vx: (Math.random() - 0.5) * 3,
+        vy: (Math.random() - 0.5) * 3,
+        radius: 32,
+        color: "red"
+      };
+    }
+
+    // Create a new substrate chain.
+    // Each chain now has 10 hexagons (instead of 5).
+    function createSubstrateChain() {
+      const chainLength = 10; // now 10 hexagons long
+      return {
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        angle: Math.random() * Math.PI * 2,
+        vx: (Math.random() - 0.5) * 2,
+        vy: (Math.random() - 0.5) * 2,
+        segments: new Array(chainLength).fill(0)
+      };
+    }
+
+    // When a chain is cut, create new substrate chains from an array of hexagon positions.
+    function createSubstrateChainFromPositions(positions, angle, vx, vy) {
+      const first = positions[0];
+      const last = positions[positions.length - 1];
+      const centerX = (first.x + last.x) / 2;
+      const centerY = (first.y + last.y) / 2;
+      return {
+        x: centerX,
+        y: centerY,
+        angle: angle,
+        vx: vx + (Math.random() - 0.5) * 1,
+        vy: vy + (Math.random() - 0.5) * 1,
+        segments: new Array(positions.length).fill(0)
+      };
+    }
+    // Alias function
+    function createSubstrateChainFromSegments(positions, angle, vx, vy) {
+      return createSubstrateChainFromPositions(positions, angle, vx, vy);
+    }
+
+    // --- Adjust arrays based on slider target values ---
+
+    function adjustEnzymes() {
+      while (enzymes.length < targetEnzymeCount) {
+        enzymes.push(createEnzyme());
+      }
+      while (enzymes.length > targetEnzymeCount) {
+        enzymes.pop();
+      }
+    }
+
+    // Adjust substrates based on the slider value.
+    function adjustSubstrates() {
+      while (substrates.length < targetSubstrateCount) {
+        substrates.push(createSubstrateChain());
+      }
+      while (substrates.length > targetSubstrateCount) {
+        substrates.pop();
+      }
+    }
+
+    // Reset all substrate chains to their whole (unsplit) state.
+    function resetSubstrates() {
+      substrates = [];
+      for (let i = 0; i < targetSubstrateCount; i++) {
+        substrates.push(createSubstrateChain());
+      }
+    }
+
+    // --- Simulation Update Function ---
+    function update() {
+      // Update enzymes: move them and bounce off walls.
+      enzymes.forEach(enzyme => {
+        enzyme.x += enzyme.vx;
+        enzyme.y += enzyme.vy;
+        if (enzyme.x < enzyme.radius || enzyme.x > canvas.width - enzyme.radius) {
+          enzyme.vx *= -1;
+        }
+        if (enzyme.y < enzyme.radius || enzyme.y > canvas.height - enzyme.radius) {
+          enzyme.vy *= -1;
+        }
+      });
+
+      // For substrates, note that the hexagons are now smaller.
+      substrates.forEach(chain => {
+        chain.x += chain.vx;
+        chain.y += chain.vy;
+        // Use half-size hexagons (radius 10)
+        const hexagonRadius = 10;
+        const spacing = hexagonRadius * 1.8;
+        const halfLength = ((chain.segments.length - 1) / 2) * spacing;
+        const chainBound = halfLength + hexagonRadius;
+        if (chain.x < chainBound || chain.x > canvas.width - chainBound) {
+          chain.vx *= -1;
+        }
+        if (chain.y < chainBound || chain.y > canvas.height - chainBound) {
+          chain.vy *= -1;
+        }
+      });
+
+      // Check for collisions between enzymes and each hexagon in every substrate chain.
+      const hexagonRadius = 10;
+      const spacing = hexagonRadius * 1.8;
+      for (let e = 0; e < enzymes.length; e++) {
+        let enzyme = enzymes[e];
+        for (let i = substrates.length - 1; i >= 0; i--) {
+          let chain = substrates[i];
+          let collided = false;
+          for (let j = 0; j < chain.segments.length; j++) {
+            const offset = (j - (chain.segments.length - 1) / 2) * spacing;
+            const hx = chain.x + offset * Math.cos(chain.angle);
+            const hy = chain.y + offset * Math.sin(chain.angle);
+            const dx = enzyme.x - hx;
+            const dy = enzyme.y - hy;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < enzyme.radius + hexagonRadius * 0.9) {
+              collided = true;
+              if (chain.segments.length > 1) {
+                let positions = [];
+                for (let k = 0; k < chain.segments.length; k++) {
+                  const off = (k - (chain.segments.length - 1) / 2) * spacing;
+                  positions.push({
+                    x: chain.x + off * Math.cos(chain.angle),
+                    y: chain.y + off * Math.sin(chain.angle)
+                  });
+                }
+                let newChains = [];
+                if (j === 0) {
+                  newChains.push(createSubstrateChainFromPositions([positions[0]], chain.angle, chain.vx, chain.vy));
+                  if (chain.segments.length - 1 > 0) {
+                    newChains.push(createSubstrateChainFromPositions(positions.slice(1), chain.angle, chain.vx, chain.vy));
+                  }
+                } else if (j === chain.segments.length - 1) {
+                  newChains.push(createSubstrateChainFromPositions(positions.slice(0, chain.segments.length - 1), chain.angle, chain.vx, chain.vy));
+                  newChains.push(createSubstrateChainFromPositions([positions[chain.segments.length - 1]], chain.angle, chain.vx, chain.vy));
+                } else {
+                  newChains.push(createSubstrateChainFromPositions(positions.slice(0, j + 1), chain.angle, chain.vx, chain.vy));
+                  newChains.push(createSubstrateChainFromPositions(positions.slice(j + 1), chain.angle, chain.vx, chain.vy));
+                }
+                substrates.splice(i, 1);
+                substrates.push(...newChains);
+              }
+              break;
+            }
+          }
+          if (collided) {
+            // Optionally, break to allow only one cut per enzyme per frame.
+            // break;
+          }
+        }
+      }
+    }
+
+    // --- Drawing Functions ---
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw enzymes first so they render underneath.
+      enzymes.forEach(enzyme => {
+        drawCrescent(enzyme.x, enzyme.y, enzyme.radius, enzyme.color);
+      });
+
+      // Draw substrate chains as yellow hexagons on top.
+      substrates.forEach(chain => {
+        const hexagonRadius = 10;
+        const spacing = hexagonRadius * 1.8;
+        for (let j = 0; j < chain.segments.length; j++) {
+          const offset = (j - (chain.segments.length - 1) / 2) * spacing;
+          const hx = chain.x + offset * Math.cos(chain.angle);
+          const hy = chain.y + offset * Math.sin(chain.angle);
+          drawHexagon(hx, hy, hexagonRadius, "yellow");
+        }
+      });
+
+      // --- Update the counter ---
+      let totalHexagons = 0;
+      let freeHexagons = 0;
+      substrates.forEach(chain => {
+        totalHexagons += chain.segments.length;
+        if (chain.segments.length === 1) freeHexagons++;
+      });
+      let percentDigested = totalHexagons > 0 ? Math.floor((freeHexagons / totalHexagons) * 100) : 100;
+      document.getElementById("counter").textContent = "% of starch digested: " + percentDigested + "%";
+    }
+
+    // Draw a regular hexagon (pointy-top) centered at (x,y).
+    function drawHexagon(x, y, radius, color) {
+      const sides = 6;
+      ctx.beginPath();
+      for (let i = 0; i < sides; i++) {
+        const angle = Math.PI / 180 * (60 * i - 30);
+        const vx = x + radius * Math.cos(angle);
+        const vy = y + radius * Math.sin(angle);
+        if (i === 0) {
+          ctx.moveTo(vx, vy);
+        } else {
+          ctx.lineTo(vx, vy);
+        }
+      }
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = "black";
+      ctx.stroke();
+    }
+
+    // Draw a crescent shape by drawing a circle and "subtracting" an offset circle.
+    function drawCrescent(x, y, radius, color) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2, false);
+      ctx.fillStyle = color;
+      ctx.fill();
+      
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.beginPath();
+      ctx.arc(x + radius * 0.4, y - radius * 0.4, radius, 0, Math.PI * 2, false);
+      ctx.fill();
+      
+      ctx.restore();
+      
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2, false);
+      ctx.strokeStyle = "black";
+      ctx.stroke();
+    }
+
+    // --- Main Animation Loop ---
+    function loop() {
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    // Initialize simulation and start the loop.
+    adjustEnzymes();
+    adjustSubstrates();
+    loop();
+  </script>
+</body>
+</html>
